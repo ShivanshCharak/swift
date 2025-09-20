@@ -1,10 +1,12 @@
-import Groq from "groq-sdk";
+import OpenAi from 'openai';
 import { headers } from "next/headers";
 import { z } from "zod";
 import { zfd } from "zod-form-data";
 import { after } from "next/server";
 
-const groq = new Groq();
+const openai = new OpenAi({
+	apiKey:process.env.OPENAI_API_KEY
+});
 
 const schema = zfd.formData({
 	input: z.union([zfd.text(), zfd.file()]),
@@ -19,23 +21,17 @@ const schema = zfd.formData({
 });
 
 export async function POST(request: Request) {
-	console.time("transcribe " + request.headers.get("x-vercel-id") || "local");
+	// console.time("transcribe " + request.headers.get("x-vercel-id") || "local");
 
 	const { data, success } = schema.safeParse(await request.formData());
 	if (!success) return new Response("Invalid request", { status: 400 });
 
 	const transcript = await getTranscript(data.input);
+	console.log("transcript",transcript)
 	if (!transcript) return new Response("Invalid audio", { status: 400 });
 
-	console.timeEnd(
-		"transcribe " + request.headers.get("x-vercel-id") || "local"
-	);
-	console.time(
-		"text completion " + request.headers.get("x-vercel-id") || "local"
-	);
-
-	const completion = await groq.chat.completions.create({
-		model: "llama3-8b-8192",
+	const completion = await openai.chat.completions.create({
+		model: "gpt-4o-mini",
 		messages: [
 			{
 				role: "system",
@@ -47,7 +43,7 @@ export async function POST(request: Request) {
 			- Do not use markdown, emojis, or other formatting in your responses. Respond in a way easily spoken by text-to-speech software.
 			- User location is ${await location()}.
 			- The current time is ${await time()}.
-			- Your large language model is Llama 3, created by Meta, the 8 billion parameter version. It is hosted on Groq, an AI infrastructure company that builds fast inference technology.
+			- Your large language model is Llama 3, created by Meta, the 8 billion parameter version. It is hosted on openai, an AI infrastructure company that builds fast inference technology.
 			- Your text-to-speech model is Sonic, created and hosted by Cartesia, a company that builds fast and realistic speech synthesis technology.
 			- You are built with Next.js and hosted on Vercel.`,
 			},
@@ -60,22 +56,17 @@ export async function POST(request: Request) {
 	});
 
 	const response = completion.choices[0].message.content;
-	console.timeEnd(
-		"text completion " + request.headers.get("x-vercel-id") || "local"
-	);
 
 	if (!response) return new Response("Invalid response", { status: 500 });
 
-	console.time(
-		"cartesia request " + request.headers.get("x-vercel-id") || "local"
-	);
 
 	const voice = await fetch("https://api.cartesia.ai/tts/bytes", {
 		method: "POST",
+		// @ts-ignore
 		headers: {
 			"Cartesia-Version": "2024-06-30",
 			"Content-Type": "application/json",
-			"X-API-Key": process.env.CARTESIA_API_KEY!,
+			"X-API-Key": process.env.CARTESIA_API_KEY,
 		},
 		body: JSON.stringify({
 			model_id: "sonic-english",
@@ -91,10 +82,6 @@ export async function POST(request: Request) {
 			},
 		}),
 	});
-
-	console.timeEnd(
-		"cartesia request " + request.headers.get("x-vercel-id") || "local"
-	);
 
 	if (!voice.ok) {
 		console.error(await voice.text());
@@ -136,9 +123,9 @@ async function getTranscript(input: string | File) {
 	if (typeof input === "string") return input;
 
 	try {
-		const { text } = await groq.audio.transcriptions.create({
+		const { text } = await openai.audio.transcriptions.create({
 			file: input,
-			model: "whisper-large-v3",
+			model: "whisper-1",
 		});
 
 		return text.trim() || null;
@@ -146,3 +133,4 @@ async function getTranscript(input: string | File) {
 		return null; // Empty audio file
 	}
 }
+
